@@ -1,0 +1,22 @@
+# Ambientes Virtuais e IDEs
+.venv/
+.idea/
+__pycache__/
+*.pyc
+
+# Arquivos temporários e datasets locais
+dataset_scorpion/
+runs/
+yolov8n.pt
+yolo26n.pt
+limpar_dataset.py
+train.py
+SCORPION.yolov8.zip
+.env
+
+# O arquivo best.pt DEVE subir para o GitHub para que o Render consiga baixar e consumir a API.
+!best.pt
+
+# Imagens processadas
+static/alerta_atual.jpg
+static/*.jpg
