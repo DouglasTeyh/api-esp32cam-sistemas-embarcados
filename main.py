@@ -66,7 +66,11 @@ class DeteccaoResponse(BaseModel):
     acionar_alarme: bool
     tempo_segundos: int | None = None
     erro: str | None = None
-
+    
+@app.get("/")
+async def root():
+    return {"status": "API Online", "documentacao": "/docs"}
+    
 @app.post("/detectar", response_model=DeteccaoResponse, tags=["Detecção"])
 async def detectar_animal(
     background_tasks: BackgroundTasks, 
