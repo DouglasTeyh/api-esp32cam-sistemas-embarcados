@@ -2,6 +2,7 @@ import os
 import cv2
 import numpy as np
 import smtplib
+import requests
 from email.message import EmailMessage
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -16,8 +17,8 @@ app = FastAPI(
     title="API Detecção de Escorpiões - ESP32Cam",
     description="API que recebe imagens de um ESP32, analisa através do YOLOv8 treinado localmente se há escorpiões e envia alertas por E-mail.",
     version="1.0.0",
-    docs_url="/docs",  
-    redoc_url="/redoc" 
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 os.makedirs("static", exist_ok=True)
@@ -28,23 +29,16 @@ YOLO_MODEL_PATH = "best.pt"
 EMAIL_REMETENTE = os.getenv("EMAIL_REMETENTE")
 EMAIL_SENHA = os.getenv("EMAIL_SENHA")
 
-if not EMAIL_REMETENTE or not EMAIL_SENHA:
-    print("Aviso: Variáveis de ambiente EMAIL_REMETENTE ou EMAIL_SENHA não configuradas.")
-
 try:
     if os.path.exists(YOLO_MODEL_PATH):
         model = YOLO(YOLO_MODEL_PATH)
-        print(f"Modelo YOLO carregado com sucesso a partir de {YOLO_MODEL_PATH}!")
     else:
-        print(f"Aviso: Arquivo de modelo não encontrado em {YOLO_MODEL_PATH}.")
         model = None
-except Exception as e:
-    print(f"Aviso: Erro ao inicializar o YOLOv8: {e}")
+except Exception:
     model = None
 
 def send_email_alert(image_path: str, destinatario: str):
     if not EMAIL_REMETENTE or not EMAIL_SENHA:
-        print("Erro: Remetente ou senha do e-mail não configurados. O alerta não foi enviado.")
         return
 
     try:
@@ -64,10 +58,8 @@ def send_email_alert(image_path: str, destinatario: str):
         with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
             smtp.login(EMAIL_REMETENTE, EMAIL_SENHA)
             smtp.send_message(msg)
-            
-        print(f"E-mail de alerta enviado com sucesso para {destinatario}!")
-    except Exception as e:
-        print(f"Erro ao enviar e-mail: {e}")
+    except Exception:
+        pass
 
 class DeteccaoResponse(BaseModel):
     animal_detectado: bool
@@ -75,7 +67,7 @@ class DeteccaoResponse(BaseModel):
     tempo_segundos: int | None = None
     erro: str | None = None
 
-@app.post("/detectar", response_model=DeteccaoResponse, summary="Detecta escorpiões em uma imagem enviada pelo ESP32", tags=["Detecção"])
+@app.post("/detectar", response_model=DeteccaoResponse, tags=["Detecção"])
 async def detectar_animal(
     background_tasks: BackgroundTasks, 
     file: UploadFile = File(...),
@@ -88,6 +80,9 @@ async def detectar_animal(
         contents = await file.read()
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Falha ao decodificar a imagem.")
         
         if model is None:
             return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Modelo YOLOv8 não carregado.")
@@ -98,7 +93,6 @@ async def detectar_animal(
         
         if len(deteccoes) > 0:
             img_com_boxes = result.plot()
-                
             imagem_alerta_nome = "alerta_atual.jpg"
             imagem_alerta_path = os.path.join("static", imagem_alerta_nome)
             cv2.imwrite(imagem_alerta_path, img_com_boxes)
@@ -110,7 +104,57 @@ async def detectar_animal(
                 acionar_alarme=True,
                 tempo_segundos=15
             )
+        else:
+            return DeteccaoResponse(
+                animal_detectado=False,
+                acionar_alarme=False
+            )
             
+    except Exception as e:
+        return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro=str(e))
+
+@app.post("/detectar-url", response_model=DeteccaoResponse, tags=["Detecção via URL"])
+async def detectar_animal_url(
+    background_tasks: BackgroundTasks, 
+    image_url: str = Form(...),
+    email_destinatario: str = Form(...)
+):
+    if not email_destinatario:
+        raise HTTPException(status_code=400, detail="O email_destinatario é obrigatório.")
+    if not image_url:
+        raise HTTPException(status_code=400, detail="A image_url é obrigatória.")
+
+    try:
+        response = requests.get(image_url, timeout=15)
+        response.raise_for_status()
+        contents = response.content
+
+        nparr = np.frombuffer(contents, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+        if img is None:
+            return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Falha ao decodificar a imagem da URL.")
+        
+        if model is None:
+            return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Modelo YOLOv8 não carregado.")
+            
+        results = model.predict(source=img, conf=0.4, save=False)
+        result = results[0]
+        deteccoes = result.boxes
+        
+        if len(deteccoes) > 0:
+            img_com_boxes = result.plot()
+            imagem_alerta_nome = "alerta_atual_url.jpg"
+            imagem_alerta_path = os.path.join("static", imagem_alerta_nome)
+            cv2.imwrite(imagem_alerta_path, img_com_boxes)
+            
+            background_tasks.add_task(send_email_alert, imagem_alerta_path, email_destinatario)
+            
+            return DeteccaoResponse(
+                animal_detectado=True,
+                acionar_alarme=True,
+                tempo_segundos=15
+            )
         else:
             return DeteccaoResponse(
                 animal_detectado=False,
