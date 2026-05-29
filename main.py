@@ -269,7 +269,7 @@ async def status_dispositivo(dispositivo_id: str):
     }
 
 @app.post("/detectar", response_model=DeteccaoResponse, tags=["Detecção"])
-async def detectar_animal(
+def detectar_animal(
     background_tasks: BackgroundTasks, 
     file: UploadFile = File(...),
     dispositivo_id: str = Form(...),
@@ -279,7 +279,7 @@ async def detectar_animal(
         raise HTTPException(status_code=400, detail="O dispositivo_id é obrigatório.")
 
     try:
-        contents = await file.read()
+        contents = file.file.read()
         
         # Se for uma foto de teste
         if is_test:
@@ -336,7 +336,7 @@ async def detectar_animal(
         if model is None:
             return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Modelo YOLOv8 não carregado.")
             
-        results = model.predict(source=img, conf=0.4, save=False)
+        results = model.predict(source=img, conf=0.4, imgsz=320, save=False)
         result = results[0]
         deteccoes = result.boxes
         
@@ -396,7 +396,7 @@ async def detectar_animal_url(
         if model is None:
             return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Modelo YOLOv8 não carregado.")
             
-        results = model.predict(source=img, conf=0.4, save=False)
+        results = model.predict(source=img, conf=0.4, imgsz=320, save=False)
         result = results[0]
         deteccoes = result.boxes
         
