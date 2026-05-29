@@ -20,3 +20,5 @@ SCORPION.yolov8.zip
 # Imagens processadas
 static/alerta_atual.jpg
 static/*.jpg
+
+esp32cam_firmware/
