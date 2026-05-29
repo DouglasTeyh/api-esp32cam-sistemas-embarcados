@@ -1,10 +1,24 @@
 import os
+
+# Configurar limite de threads para evitar CPU thrashing no Render.com (essencial para plano gratuito com CPU limitada)
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import cv2
 import numpy as np
 import json
 import threading
 import time
 import requests
+import torch
+
+# Limitar threads internas do PyTorch
+torch.set_num_threads(1)
+torch.set_num_interop_threads(1)
+
 from fastapi import FastAPI, File, UploadFile, Form, BackgroundTasks, HTTPException
 from fastapi.staticfiles import StaticFiles
 from ultralytics import YOLO
