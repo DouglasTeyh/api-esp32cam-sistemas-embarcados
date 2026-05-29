@@ -260,17 +260,25 @@ class DeteccaoResponse(BaseModel):
 async def root():
     return {"status": "API Online", "documentacao": "/docs", "telegram_bot": "Ativo"}
 
+cached_bot_username = None
+
 @app.get("/config", tags=["Configuração"])
 async def get_config():
-    bot_username = "BotDesconhecido"
-    if TELEGRAM_BOT_TOKEN:
-        try:
-            res = requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe", timeout=5)
-            if res.status_code == 200:
-                bot_username = res.json().get("result", {}).get("username", "BotDesconhecido")
-        except Exception:
-            pass
-    return {"bot_username": bot_username}
+    global cached_bot_username
+    if cached_bot_username is None:
+        if TELEGRAM_BOT_TOKEN:
+            try:
+                res = requests.get(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getMe", timeout=5)
+                if res.status_code == 200:
+                    cached_bot_username = res.json().get("result", {}).get("username", "BotDesconhecido")
+                else:
+                    return {"bot_username": "BotDesconhecido"}
+            except Exception as e:
+                print(f"Erro ao obter bot_username do Telegram: {e}")
+                return {"bot_username": "BotDesconhecido"}
+        else:
+            cached_bot_username = "BotDesconhecido"
+    return {"bot_username": cached_bot_username}
 
 @app.get("/status-dispositivo/{dispositivo_id}", tags=["Status"])
 async def status_dispositivo(dispositivo_id: str):
