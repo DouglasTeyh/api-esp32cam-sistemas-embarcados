@@ -129,16 +129,49 @@ def telegram_bot_polling():
                         chat_id = msg["chat"]["id"]
                         text = msg.get("text", "").strip()
                         
-                        if text == "/start":
+                        if text in ("/start", "➕ Registrar Novo"):
                             welcome_msg = (
                                 "Olá! Bem-vindo ao *Bot VenomESP* 🦂\n\n"
-                                "Para receber alertas de Animais Peçonhentos do seu dispositivo VenomESP, "
+                                "Para receber alertas de escorpiões do seu ESP32-CAM, "
                                 "por favor me envie o *Número de Série* do seu dispositivo.\n\n"
                                 "Exemplo:\n`ESP32-CAM-XX:XX:XX:XX:XX:XX`"
                             )
                             requests.post(f"{url}sendMessage", json={
                                 "chat_id": chat_id, 
                                 "text": welcome_msg, 
+                                "parse_mode": "Markdown",
+                                "reply_markup": {
+                                    "keyboard": [
+                                        [{"text": "📋 Meus Dispositivos"}, {"text": "➕ Registrar Novo"}],
+                                        [{"text": "❓ Ajuda"}]
+                                    ],
+                                    "resize_keyboard": True
+                                }
+                            })
+                        elif text == "📋 Meus Dispositivos":
+                            with registrations_lock:
+                                user_devices = [dev for dev, cid in registrations.items() if cid == chat_id]
+                            if user_devices:
+                                devices_list = "\n".join(f"• `{dev}`" for dev in user_devices)
+                                msg_text = f"📋 *Seus Dispositivos Cadastrados:*\n\n{devices_list}\n\nVocê receberá alertas em tempo real para todos eles!"
+                            else:
+                                msg_text = "Você ainda não possui nenhum dispositivo VenomESP cadastrado.\nEnvie o número de série para cadastrar!"
+                            requests.post(f"{url}sendMessage", json={
+                                "chat_id": chat_id, 
+                                "text": msg_text, 
+                                "parse_mode": "Markdown"
+                            })
+                        elif text == "❓ Ajuda":
+                            help_msg = (
+                                "🦂 *Ajuda - Sistema VenomESP*\n\n"
+                                "Este bot recebe alertas de imagens do seu ESP32-CAM sempre que um escorpião ou animal peçonhento for detectado pela nossa inteligência artificial.\n\n"
+                                "• Para cadastrar um dispositivo, basta digitar o número de série completo (ex: `ESP32-CAM-XX:XX:XX:XX:XX:XX`).\n"
+                                "• Você pode cadastrar múltiplos dispositivos para este mesmo chat.\n"
+                                "• Quando o ESP32-CAM inicializar, ele piscará o flash uma vez e mandará uma foto de teste para você confirmar o funcionamento."
+                            )
+                            requests.post(f"{url}sendMessage", json={
+                                "chat_id": chat_id, 
+                                "text": help_msg, 
                                 "parse_mode": "Markdown"
                             })
                         elif text.startswith("ESP32-CAM-"):
@@ -151,17 +184,24 @@ def telegram_bot_polling():
                                 f"✅ *Dispositivo registrado com sucesso!*\n\n"
                                 f"Dispositivo ID: `{dispositivo_id}`\n"
                                 f"Chat ID: `{chat_id}`\n\n"
-                                "Você receberá alertas em tempo real com imagem sempre que um animal peçonhento for detectado!"
+                                "Você receberá alertas em tempo real sempre que um perigo for detectado neste dispositivo!"
                             )
                             requests.post(f"{url}sendMessage", json={
                                 "chat_id": chat_id, 
                                 "text": confirm_msg, 
-                                "parse_mode": "Markdown"
+                                "parse_mode": "Markdown",
+                                "reply_markup": {
+                                    "keyboard": [
+                                        [{"text": "📋 Meus Dispositivos"}, {"text": "➕ Registrar Novo"}],
+                                        [{"text": "❓ Ajuda"}]
+                                    ],
+                                    "resize_keyboard": True
+                                }
                             })
                         elif text:
                             invalid_msg = (
-                                "⚠️ *Formato inválido.*\n\n"
-                                "Por favor, para registrar seu dispositivo, envie o número de série no formato:\n"
+                                "⚠️ *Comando ou formato inválido.*\n\n"
+                                "Para registrar seu dispositivo, envie o número de série no formato:\n"
                                 "`ESP32-CAM-XX:XX:XX:XX:XX:XX`"
                             )
                             requests.post(f"{url}sendMessage", json={
@@ -232,13 +272,61 @@ async def status_dispositivo(dispositivo_id: str):
 async def detectar_animal(
     background_tasks: BackgroundTasks, 
     file: UploadFile = File(...),
-    dispositivo_id: str = Form(...)
+    dispositivo_id: str = Form(...),
+    is_test: bool = Form(False)
 ):
     if not dispositivo_id:
         raise HTTPException(status_code=400, detail="O dispositivo_id é obrigatório.")
 
     try:
         contents = await file.read()
+        
+        # Se for uma foto de teste
+        if is_test:
+            imagem_alerta_nome = f"teste_{dispositivo_id.replace(':', '_')}_{int(time.time())}.jpg"
+            imagem_alerta_path = os.path.join("static", imagem_alerta_nome)
+            with open(imagem_alerta_path, "wb") as f:
+                f.write(contents)
+            
+            # Verificar se há chat cadastrado
+            with registrations_lock:
+                chat_id = registrations.get(dispositivo_id)
+            
+            if chat_id:
+                def send_test_alert(image_path: str, chat_id: int, dispositivo_id: str):
+                    if not TELEGRAM_BOT_TOKEN:
+                        return
+                    url_photo = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+                    caption = (
+                        f"📸 *CONEXÃO ESTABELECIDA* 📸\n\n"
+                        f"O dispositivo `{dispositivo_id}` foi inicializado com sucesso e enviou esta primeira imagem de teste!\n\n"
+                        f"🟢 Status: *Online e Monitorando*"
+                    )
+                    try:
+                        with open(image_path, "rb") as photo_file:
+                            files = {"photo": photo_file}
+                            data = {
+                                "chat_id": chat_id,
+                                "caption": caption,
+                                "parse_mode": "Markdown"
+                            }
+                            requests.post(url_photo, data=data, files=files, timeout=20)
+                    except Exception as e:
+                        print(f"Erro ao enviar foto de teste: {e}")
+                
+                background_tasks.add_task(send_test_alert, imagem_alerta_path, chat_id, dispositivo_id)
+                return DeteccaoResponse(
+                    animal_detectado=False,
+                    acionar_alarme=False,
+                    tempo_segundos=0
+                )
+            else:
+                return DeteccaoResponse(
+                    animal_detectado=False,
+                    acionar_alarme=False,
+                    erro=f"Dispositivo {dispositivo_id} não está registrado no bot do Telegram."
+                )
+
         nparr = np.frombuffer(contents, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
