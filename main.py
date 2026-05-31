@@ -305,11 +305,43 @@ def predict_yolo(img):
     return detections, img_draw
 
 @app.post("/detectar", response_model=DeteccaoResponse)
-def detectar_animal(background_tasks: BackgroundTasks, file: UploadFile = File(...), dispositivo_id: str = Form(...)):
+def detectar_animal(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    dispositivo_id: str = Form(...),
+    is_test: bool = Form(False)
+):
     if net is None:
         return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Modelo YOLO não carregado.")
     try:
-        img = cv2.imdecode(np.frombuffer(file.file.read(), np.uint8), cv2.IMREAD_COLOR)
+        contents = file.file.read()
+        dispositivo_clean = dispositivo_id.strip().upper()
+
+        if is_test:
+            dispositivo_limpo = dispositivo_id.replace(":", "_")
+            path = f"static/teste_{dispositivo_limpo}_{int(time.time())}.jpg"
+            with open(path, "wb") as f:
+                f.write(contents)
+
+            with registrations_lock: chat_id = registrations.get(dispositivo_clean)
+            if chat_id:
+                def send_test_alert(image_path: str, chat_id: int, dispositivo_id: str):
+                    if not TELEGRAM_BOT_TOKEN: return
+                    url_photo = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+                    caption = (
+                        f"📸 *CONEXÃO ESTABELECIDA* 📸\n\n"
+                        f"O dispositivo `{dispositivo_id}` foi inicializado com sucesso e enviou esta primeira imagem de teste!\n\n"
+                        f"🟢 Status: *Online e Monitorando*"
+                    )
+                    try:
+                        with open(image_path, "rb") as photo_file:
+                            requests.post(url_photo, data={"chat_id": chat_id, "caption": caption, "parse_mode": "Markdown"}, files={"photo": photo_file}, timeout=20)
+                    except Exception as e: print(f"Erro Telegram teste: {e}")
+
+                background_tasks.add_task(send_test_alert, path, chat_id, dispositivo_id)
+            return DeteccaoResponse(animal_detectado=False, acionar_alarme=False)
+
+        img = cv2.imdecode(np.frombuffer(contents, np.uint8), cv2.IMREAD_COLOR)
         if img is None:
             return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Falha ao decodificar imagem.")
             
@@ -321,7 +353,6 @@ def detectar_animal(background_tasks: BackgroundTasks, file: UploadFile = File(.
             path = f"static/alerta_{dispositivo_limpo}_{int(time.time())}.jpg"
             cv2.imwrite(path, img_draw)
             
-            dispositivo_clean = dispositivo_id.strip().upper()
             with registrations_lock: chat_id = registrations.get(dispositivo_clean)
             if chat_id: background_tasks.add_task(send_telegram_alert, path, chat_id, dispositivo_id, animais)
             
