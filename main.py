@@ -46,6 +46,7 @@ except Exception as e:
 REGISTRATIONS_FILE = "registrations.json"
 registrations = {}
 registrations_lock = threading.Lock()
+bot_username = "BotDesconhecido"
 
 def load_registrations():
     global registrations
@@ -73,8 +74,19 @@ def send_telegram_alert(image_path: str, chat_id: int, dispositivo_id: str, anim
     except Exception as e: print(f"Erro Telegram: {e}")
 
 def telegram_bot_polling():
+    global bot_username
     if not TELEGRAM_BOT_TOKEN: return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/"
+    
+    # Obter nome do bot para a resposta da API config
+    try:
+        res = requests.get(f"{url}getMe", timeout=10)
+        if res.status_code == 200:
+            bot_username = res.json().get("result", {}).get("username", "BotDesconhecido")
+            print(f"Bot carregado: @{bot_username}")
+    except Exception as e:
+        print(f"Erro ao consultar getMe no Telegram: {e}")
+
     last_id = 0
     while True:
         try:
@@ -84,7 +96,7 @@ def telegram_bot_polling():
                     last_id = update["update_id"]
                     msg = update.get("message", {})
                     chat_id = msg.get("chat", {}).get("id")
-                    text = msg.get("text", "")
+                    text = msg.get("text") or ""
                     
                     if text in ("/start", "➕ Registrar Novo"):
                         requests.post(f"{url}sendMessage", json={"chat_id": chat_id, "text": "Bem-vindo ao *VenomESP*! Envie o número de série do dispositivo (ESP32-CAM-XX:XX:XX:XX:XX:XX).", "parse_mode": "Markdown"})
@@ -103,16 +115,29 @@ class DeteccaoResponse(BaseModel):
     acionar_alarme: bool
     erro: str | None = None
 
+@app.get("/config")
+def get_config():
+    return {"bot_username": bot_username}
+
+@app.get("/status-dispositivo/{dispositivo_id}")
+def check_dispositivo_status(dispositivo_id: str):
+    with registrations_lock:
+        registrado = dispositivo_id in registrations
+    return {"registrado": registrado}
+
 @app.post("/detectar", response_model=DeteccaoResponse)
 def detectar_animal(background_tasks: BackgroundTasks, file: UploadFile = File(...), dispositivo_id: str = Form(...)):
+    if model is None:
+        return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Modelo YOLO não carregado.")
     try:
         img = cv2.imdecode(np.frombuffer(file.file.read(), np.uint8), cv2.IMREAD_COLOR)
-        # Otimização: conf=0.25 (Recall) e imgsz=640 (Resolução)
-        results = model.predict(source=img, conf=0.25, imgsz=640, save=False)[0]
+        # Otimização: conf=0.25 (Recall) e imgsz=512 (Resolução nativa do modelo), device="cpu" para robustez
+        results = model.predict(source=img, conf=0.25, imgsz=512, save=False, device="cpu")[0]
         
         if len(results.boxes) > 0:
             animais = ", ".join(set([model.names[int(b.cls)] for b in results.boxes]))
-            path = f"static/alerta_{int(time.time())}.jpg"
+            dispositivo_limpo = dispositivo_id.replace(":", "_")
+            path = f"static/alerta_{dispositivo_limpo}_{int(time.time())}.jpg"
             cv2.imwrite(path, results.plot())
             
             with registrations_lock: chat_id = registrations.get(dispositivo_id)
