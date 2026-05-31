@@ -94,25 +94,65 @@ def telegram_bot_polling():
         print(f"Erro ao consultar getMe no Telegram: {e}")
 
     last_id = 0
+    # Obter o último update_id para iniciar o polling sem reprocessar mensagens antigas
+    try:
+        res = requests.get(f"{url}getUpdates", params={"limit": 1}, timeout=10)
+        if res.status_code == 200:
+            results = res.json().get("result", [])
+            if results:
+                last_id = results[0]["update_id"]
+    except Exception as e:
+        print(f"Erro inicial de getUpdates: {e}")
+
     while True:
         try:
             res = requests.get(f"{url}getUpdates", params={"offset": last_id + 1, "timeout": 20}, timeout=25)
             if res.status_code == 200:
                 for update in res.json().get("result", []):
                     last_id = update["update_id"]
-                    msg = update.get("message", {})
-                    chat_id = msg.get("chat", {}).get("id")
-                    text = msg.get("text") or ""
                     
-                    if text in ("/start", "➕ Registrar Novo"):
-                        requests.post(f"{url}sendMessage", json={"chat_id": chat_id, "text": "Bem-vindo ao *VenomESP*! Envie o número de série do dispositivo (ESP32-CAM-XX:XX:XX:XX:XX:XX).", "parse_mode": "Markdown"})
-                    elif text == "❓ Ajuda":
-                        requests.post(f"{url}sendMessage", json={"chat_id": chat_id, "text": "🦂 *VenomESP*\nMonitora: Escorpiões, Cobras, Aranhas e Centopeias.", "parse_mode": "Markdown"})
-                    elif text.startswith("ESP32-CAM-"):
-                        with registrations_lock: registrations[text] = chat_id
-                        save_registrations()
-                        requests.post(f"{url}sendMessage", json={"chat_id": chat_id, "text": "✅ Dispositivo registrado!"})
-        except: time.sleep(5)
+                    # Processa cada update de forma independente para evitar travar o loop
+                    try:
+                        msg = update.get("message")
+                        if not msg:
+                            continue
+                        
+                        chat = msg.get("chat")
+                        if not chat:
+                            continue
+                            
+                        chat_id = chat.get("id")
+                        text = msg.get("text") or ""
+                        
+                        if text in ("/start", "➕ Registrar Novo"):
+                            requests.post(
+                                f"{url}sendMessage", 
+                                json={"chat_id": chat_id, "text": "Bem-vindo ao *VenomESP*! Envie o número de série do dispositivo (ESP32-CAM-XX:XX:XX:XX:XX:XX).", "parse_mode": "Markdown"},
+                                timeout=10
+                            )
+                        elif text == "❓ Ajuda":
+                            requests.post(
+                                f"{url}sendMessage", 
+                                json={"chat_id": chat_id, "text": "🦂 *VenomESP*\nMonitora: Escorpiões, Cobras, Aranhas e Centopeias.", "parse_mode": "Markdown"},
+                                timeout=10
+                            )
+                        elif text.startswith("ESP32-CAM-"):
+                            with registrations_lock: 
+                                registrations[text] = chat_id
+                            save_registrations()
+                            requests.post(
+                                f"{url}sendMessage", 
+                                json={"chat_id": chat_id, "text": "✅ Dispositivo registrado!"},
+                                timeout=10
+                            )
+                    except Exception as inner_e:
+                        print(f"Erro ao processar update {last_id}: {inner_e}")
+            else:
+                print(f"getUpdates retornou HTTP {res.status_code}")
+                time.sleep(5)
+        except Exception as e:
+            print(f"Erro no loop de polling do Telegram: {e}")
+            time.sleep(5)
 
 threading.Thread(target=telegram_bot_polling, daemon=True).start()
 
