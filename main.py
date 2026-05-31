@@ -40,14 +40,14 @@ app = FastAPI(
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-YOLO_MODEL_PATH = "best.pt"
+YOLO_MODEL_PATH = "best.onnx"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 # Carregar modelo YOLOv8
 try:
     if os.path.exists(YOLO_MODEL_PATH):
-        model = YOLO(YOLO_MODEL_PATH)
+        model = YOLO(YOLO_MODEL_PATH, task="detect")
     else:
         model = None
 except Exception as e:

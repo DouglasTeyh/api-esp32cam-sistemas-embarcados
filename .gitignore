@@ -16,6 +16,7 @@ SCORPION.yolov8.zip
 
 # O arquivo best.pt DEVE subir para o GitHub para que o Render consiga baixar e consumir a API.
 !best.pt
+!best.onnx
 
 # Imagens processadas
 static/alerta_atual.jpg
