@@ -122,27 +122,81 @@ def telegram_bot_polling():
                             continue
                             
                         chat_id = chat.get("id")
-                        text = msg.get("text") or ""
+                        text = (msg.get("text") or "").strip()
+                        
+                        # Menu Keyboard
+                        menu_keyboard = {
+                            "keyboard": [
+                                [{"text": "📋 Meus Dispositivos"}, {"text": "➕ Registrar Novo"}],
+                                [{"text": "❓ Ajuda"}]
+                            ],
+                            "resize_keyboard": True
+                        }
                         
                         if text in ("/start", "➕ Registrar Novo"):
+                            welcome_msg = (
+                                "Olá! Bem-vindo ao *Bot VenomESP* 🦂🐍🕷️\n\n"
+                                "Para receber alertas de animais peçonhentos do seu ESP32-CAM, "
+                                "por favor envie o *Número de Série* do seu dispositivo.\n\n"
+                                "Exemplo:\n`ESP32-CAM-XX:XX:XX:XX:XX:XX`"
+                            )
                             requests.post(
                                 f"{url}sendMessage", 
-                                json={"chat_id": chat_id, "text": "Bem-vindo ao *VenomESP*! Envie o número de série do dispositivo (ESP32-CAM-XX:XX:XX:XX:XX:XX).", "parse_mode": "Markdown"},
+                                json={"chat_id": chat_id, "text": welcome_msg, "parse_mode": "Markdown", "reply_markup": menu_keyboard},
+                                timeout=10
+                            )
+                        elif text == "📋 Meus Dispositivos":
+                            with registrations_lock:
+                                user_devices = [dev for dev, cid in registrations.items() if cid == chat_id]
+                            if user_devices:
+                                devices_list = "\n".join(f"• `{dev}`" for dev in user_devices)
+                                msg_text = f"📋 *Seus Dispositivos Cadastrados:*\n\n{devices_list}\n\nVocê receberá alertas em tempo real para todos eles!"
+                            else:
+                                msg_text = "Você ainda não possui nenhum dispositivo VenomESP cadastrado.\nEnvie o número de série para cadastrar!"
+                            requests.post(
+                                f"{url}sendMessage", 
+                                json={"chat_id": chat_id, "text": msg_text, "parse_mode": "Markdown", "reply_markup": menu_keyboard},
                                 timeout=10
                             )
                         elif text == "❓ Ajuda":
+                            help_msg = (
+                                "🦂 *Ajuda - Sistema VenomESP*\n\n"
+                                "Este bot recebe alertas de imagens do seu ESP32-CAM sempre que um escorpião, cobra, aranha ou centopeia for detectado pela nossa inteligência artificial.\n\n"
+                                "• Para cadastrar um dispositivo, basta enviar o número de série completo (ex: `ESP32-CAM-XX:XX:XX:XX:XX:XX`).\n"
+                                "• Você pode cadastrar múltiplos dispositivos para este mesmo chat.\n"
+                                "• Quando o ESP32-CAM inicializar, ele enviará uma foto de teste para confirmar o funcionamento.\n\n"
+                                "Use o menu abaixo para navegar!"
+                            )
                             requests.post(
                                 f"{url}sendMessage", 
-                                json={"chat_id": chat_id, "text": "🦂 *VenomESP*\nMonitora: Escorpiões, Cobras, Aranhas e Centopeias.", "parse_mode": "Markdown"},
+                                json={"chat_id": chat_id, "text": help_msg, "parse_mode": "Markdown", "reply_markup": menu_keyboard},
                                 timeout=10
                             )
-                        elif text.startswith("ESP32-CAM-"):
+                        elif text.upper().startswith("ESP32-CAM-"):
+                            device_id_clean = text.upper()
                             with registrations_lock: 
-                                registrations[text] = chat_id
+                                registrations[device_id_clean] = chat_id
                             save_registrations()
+                            confirm_msg = (
+                                f"✅ *Dispositivo registrado com sucesso!*\n\n"
+                                f"Dispositivo ID: `{device_id_clean}`\n"
+                                f"Chat ID: `{chat_id}`\n\n"
+                                "Você receberá alertas em tempo real sempre que um animal peçonhento for detectado neste dispositivo!"
+                            )
                             requests.post(
                                 f"{url}sendMessage", 
-                                json={"chat_id": chat_id, "text": "✅ Dispositivo registrado!"},
+                                json={"chat_id": chat_id, "text": confirm_msg, "parse_mode": "Markdown", "reply_markup": menu_keyboard},
+                                timeout=10
+                            )
+                        elif text:
+                            invalid_msg = (
+                                "⚠️ *Comando ou formato inválido.*\n\n"
+                                "Para registrar seu dispositivo, envie o número de série no formato:\n"
+                                "`ESP32-CAM-XX:XX:XX:XX:XX:XX`"
+                            )
+                            requests.post(
+                                f"{url}sendMessage", 
+                                json={"chat_id": chat_id, "text": invalid_msg, "parse_mode": "Markdown", "reply_markup": menu_keyboard},
                                 timeout=10
                             )
                     except Exception as inner_e:
@@ -167,8 +221,9 @@ def get_config():
 
 @app.get("/status-dispositivo/{dispositivo_id}")
 def check_dispositivo_status(dispositivo_id: str):
+    device_id_clean = dispositivo_id.strip().upper()
     with registrations_lock:
-        registrado = dispositivo_id in registrations
+        registrado = device_id_clean in registrations
     return {"registrado": registrado}
 
 CLASS_NAMES_PT = {
@@ -266,7 +321,8 @@ def detectar_animal(background_tasks: BackgroundTasks, file: UploadFile = File(.
             path = f"static/alerta_{dispositivo_limpo}_{int(time.time())}.jpg"
             cv2.imwrite(path, img_draw)
             
-            with registrations_lock: chat_id = registrations.get(dispositivo_id)
+            dispositivo_clean = dispositivo_id.strip().upper()
+            with registrations_lock: chat_id = registrations.get(dispositivo_clean)
             if chat_id: background_tasks.add_task(send_telegram_alert, path, chat_id, dispositivo_id, animais)
             
             return DeteccaoResponse(animal_detectado=True, acionar_alarme=True)
