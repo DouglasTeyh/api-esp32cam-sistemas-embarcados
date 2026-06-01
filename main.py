@@ -260,7 +260,7 @@ def predict_yolo(img):
             max_conf = float(confidence)
             max_class_id = int(class_id)
         
-        if confidence >= 0.40:
+        if confidence >= 0.28:
             x_center, y_center, w, h = row[0:4]
             x = int((x_center - w / 2) * (w_orig / 512.0))
             y = int((y_center - h / 2) * (h_orig / 512.0))
@@ -271,7 +271,7 @@ def predict_yolo(img):
             confidences.append(float(confidence))
             class_ids.append(int(class_id))
             
-    indices = cv2.dnn.NMSBoxes(boxes, confidences, 0.40, 0.45)
+    indices = cv2.dnn.NMSBoxes(boxes, confidences, 0.28, 0.45)
     
     detections = []
     img_draw = img.copy()
