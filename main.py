@@ -247,11 +247,18 @@ def predict_yolo(img):
     confidences = []
     class_ids = []
     
+    max_conf = 0.0
+    max_class_id = -1
+    
     for i in range(output.shape[0]):
         row = output[i]
         classes_scores = row[4:]
         class_id = np.argmax(classes_scores)
         confidence = classes_scores[class_id]
+        
+        if confidence > max_conf:
+            max_conf = float(confidence)
+            max_class_id = int(class_id)
         
         if confidence >= 0.40:
             x_center, y_center, w, h = row[0:4]
@@ -302,7 +309,7 @@ def predict_yolo(img):
             cv2.rectangle(img_draw, (x, y - text_h - 8), (x + text_w + 10, y), color, -1)
             cv2.putText(img_draw, label_text, (x + 5, y - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
             
-    return detections, img_draw
+    return detections, img_draw, max_conf, max_class_id
 
 @app.post("/detectar", response_model=DeteccaoResponse)
 def detectar_animal(
@@ -316,9 +323,14 @@ def detectar_animal(
     try:
         contents = file.file.read()
         dispositivo_clean = dispositivo_id.strip().upper()
+        
+        # Salvar sempre a última captura recebida para fins de debug/visualização
+        dispositivo_limpo = dispositivo_id.replace(":", "_")
+        last_capture_path = f"static/last_{dispositivo_limpo}.jpg"
+        with open(last_capture_path, "wb") as f:
+            f.write(contents)
 
         if is_test:
-            dispositivo_limpo = dispositivo_id.replace(":", "_")
             path = f"static/teste_{dispositivo_limpo}_{int(time.time())}.jpg"
             with open(path, "wb") as f:
                 f.write(contents)
@@ -345,11 +357,14 @@ def detectar_animal(
         if img is None:
             return DeteccaoResponse(animal_detectado=False, acionar_alarme=False, erro="Falha ao decodificar imagem.")
             
-        detections, img_draw = predict_yolo(img)
+        detections, img_draw, max_conf, max_class_id = predict_yolo(img)
+        
+        # Logger do terminal/Render de classificação
+        max_label = CLASS_NAMES_PT.get(max_class_id, "Nenhuma")
+        print(f"[IA-Debug] ID: {dispositivo_id} | Maior Confiança Encontrada: {max_conf*100:.2f}% para Classe '{max_label}'")
         
         if len(detections) > 0:
             animais = ", ".join(set(detections))
-            dispositivo_limpo = dispositivo_id.replace(":", "_")
             path = f"static/alerta_{dispositivo_limpo}_{int(time.time())}.jpg"
             cv2.imwrite(path, img_draw)
             
