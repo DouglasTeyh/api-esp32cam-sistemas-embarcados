@@ -323,12 +323,7 @@ def detectar_animal(
     try:
         contents = file.file.read()
         dispositivo_clean = dispositivo_id.strip().upper()
-        
-        # Salvar sempre a última captura recebida para fins de debug/visualização
         dispositivo_limpo = dispositivo_id.replace(":", "_")
-        last_capture_path = f"static/last_{dispositivo_limpo}.jpg"
-        with open(last_capture_path, "wb") as f:
-            f.write(contents)
 
         if is_test:
             path = f"static/teste_{dispositivo_limpo}_{int(time.time())}.jpg"
